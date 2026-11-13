@@ -2,7 +2,37 @@
 
 一款 DeepSeek Harness 插件：**把梯子订阅搬到 DSH 上，并按需开/关一个本地代理出口**，让 AI 在需要境外网络时自己把路打通，而不是卡在超时里。
 
-安装后 AI 拿到 5 个工具（`proxy_status` / `proxy_on` / `proxy_off` / `proxy_subscription` / `proxy_fetch`），系统提示里也会多一段「什么时候该开代理」的策略说明与实时状态。你只需要说「这个包从 GitHub 装一下」，剩下的它自己会做。
+安装后 AI 拿到 4 个工具（`proxy` / `proxy_nodes` / `proxy_subscription` / `proxy_fetch`），系统提示里也会多一段「什么时候该开代理」的策略说明与实时状态。你只需要说「这个包从 GitHub 装一下」，剩下的它自己会做。
+
+| 工具 | 参数 | 作用 |
+|---|---|---|
+| `proxy` | `action: status \| on \| off`、`node?`、`upstream?`、`verify?`、`showNodes?` | 开关代理 + 看状态 + 切节点 |
+| `proxy_nodes` | `action: list \| test`、`filter?`、`limit?` | 列节点、全量测速并排序 |
+| `proxy_subscription` | `action: list \| import \| use \| refresh \| remove` | 订阅搬家与维护 |
+| `proxy_fetch` | `url`、`maxChars?`、`timeoutMs?`、`userAgent?` | 一定走代理的文本抓取 |
+
+为什么是 4 个而不是更多：工具 schema 是每轮 prompt 的固定开销。原先 `proxy_status` / `proxy_on` / `proxy_off` 三个工具参数高度重叠，合并成 `proxy` + `action` 省下两份 schema；切节点本来就能用 `proxy(action="on", node=...)`，所以 `proxy_nodes` 不再提供 `use`。
+
+## 胶囊灯点语义
+
+| 灯 | 含义 |
+|---|---|
+| 灰色常亮 | 手动管理 + 代理关闭 |
+| 绿色常亮 | 手动管理 + 代理开启 |
+| 绿色呼吸 | 自动管理（AI 可自主开关）+ 代理开启 |
+| 蓝色常亮 | 自动管理 + 代理关闭 |
+| 警示色 | 代理开着但一个可用节点都没有 |
+
+胶囊上还直接写「自动 / 手动」文字，不只靠颜色区分。
+
+## 团队共享（重要）
+
+代理是**进程级资源**，不按智能体隔离：
+
+- 同一个 DSH 实例里，主智能体和所有子智能体（Agent Teams 成员、subagent）共用同一个出口；
+- 谁开的、谁关的都不区分——子智能体关掉代理，主智能体那边也就没了；
+- 因此 `proxy` 工具的描述里明确写了「状态是进程共享的，别在没确认的情况下关掉别人正在用的代理」；
+- 好处是子智能体去查境外文档时可以直接用上现成的出口，不必再起一个内核。
 
 ---
 
