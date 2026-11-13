@@ -354,9 +354,15 @@ window.__ModuleLoader__.load({
       const refresh = React.useCallback(async () => {
         try {
           const payload = await call('state')
-          if (payload?.state) setState(payload.state)
-        } catch {
-          /* 静默：胶囊不该因为接口抖动而报错 */
+          if (payload?.state) {
+            setState(payload.state)
+            setNote('')
+            setNoteError(false)
+          }
+        } catch (error) {
+          // 接口不可用时把原因带到面板上，而不是静默失败
+          setNote(`读取状态失败：${String(error?.message ?? error)}。若是刚重启 DSH，稍等几秒再试。`)
+          setNoteError(true)
         }
       }, [])
 
@@ -366,12 +372,15 @@ window.__ModuleLoader__.load({
         return () => clearInterval(timer)
       }, [refresh, open])
 
+      // 打开面板就立即尝试取状态；失败也要能打开（显示错误而不是「点了没反应」）
       React.useEffect(() => {
         if (!open) return
+        refresh()
+        setDetected(null)
         call('detect')
           .then((payload) => setDetected(payload?.detected ?? null))
           .catch(() => setDetected(null))
-      }, [open])
+      }, [open, refresh])
 
       // Escape 关闭
       React.useEffect(() => {
@@ -449,6 +458,31 @@ window.__ModuleLoader__.load({
         borrow: (upstream) => run('on', { upstream: String(upstream), fromUi: true }, '借用中'),
       }
 
+      // 拿不到状态时同样要能打开面板：给出可执行提示，而不是「点了没反应」
+      const fallbackModal = ReactDOM.createPortal(
+        h('div', {
+          className: 'pg-backdrop',
+          onMouseDown: (event) => {
+            if (event.target === event.currentTarget) setOpen(false)
+          },
+        }, h('div', { className: 'pg-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': '代理网关' },
+          h('div', { className: 'pg-head' },
+            h('span', { className: 'pg-dot' }),
+            h('span', { className: 'pg-head-title' }, '代理网关'),
+            h('span', { className: 'pg-head-meta' }, busy ? `${busy}…` : '读取状态中…'),
+            h('button', { className: 'pg-btn', disabled: Boolean(busy), onClick: () => refresh() }, '重试'),
+            h('button', { className: 'pg-btn', onClick: () => setOpen(false) }, '关闭面板'),
+          ),
+          h('div', { className: 'pg-body' },
+            h('div', { className: `pg-note${noteError ? ' err' : ''}` }, note || '还没有取到状态。'),
+            h('div', { className: 'pg-hint', style: { marginTop: '8px' } },
+              '如果刚重启过 DSH，插件接口可能需要几秒才挂载好，点「重试」即可。' +
+              '若一直失败，请到「插件」页确认 dsh-proxy-gate 处于启用状态。'),
+          ),
+        )),
+        document.body,
+      )
+
       const modal = state
         ? ReactDOM.createPortal(
             h('div', {
@@ -459,7 +493,7 @@ window.__ModuleLoader__.load({
             }, h(Panel, { state, detected, busy, note: summarise(note), noteError, actions, onClose: () => setOpen(false) })),
             document.body,
           )
-        : null
+        : fallbackModal
 
       return h(React.Fragment, null, h('style', null, CSS), chip, modal)
     }

@@ -156,10 +156,47 @@ export function apply(ctx, userConfig) {
   setAutoMode(store.autoMode(), { persist: false })
 
   // ---- 1b. 浏览器接口（面板与工具共用同一份实现）
-  try {
-    register(mountProxyApi({ ctx, deps, tools: toolByName, logger }))
-  } catch (error) {
-    logger.warn?.(`proxy-gate: 挂载浏览器接口失败：${error?.message ?? error}`)
+  //
+  // 冷启动时插件可能早于 webserver 初始化，此时 ctx.get('webServer') 还是
+  // undefined。只尝试一次就会永久丢掉路由，表现为「胶囊还在、点开没反应」
+  //（前端取 /proxy-gate-api/state 得到 404）。所以这里不赌单次成功：
+  // 立即试一次，失败就短间隔重试，最多 ~12 秒。
+  let apiDispose
+  const tryMountApi = () => {
+    if (apiDispose) return true
+    try {
+      const dispose = mountProxyApi({ ctx, deps, tools: toolByName, logger })
+      // mountProxyApi 在没有 webServer 时返回的是一次性空函数，无法区分；
+      // 因此用「webServer 是否可见」判断是否真的挂上了。
+      const webServer = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
+      if (!webServer) {
+        try {
+          dispose?.()
+        } catch {
+          /* 忽略 */
+        }
+        return false
+      }
+      apiDispose = dispose
+      register(dispose)
+      return true
+    } catch (error) {
+      logger.warn?.(`proxy-gate: 挂载浏览器接口失败：${error?.message ?? error}`)
+      return false
+    }
+  }
+
+  if (!tryMountApi()) {
+    let attempts = 0
+    const timer = setInterval(() => {
+      attempts += 1
+      if (tryMountApi() || attempts >= 24) {
+        clearInterval(timer)
+        if (!apiDispose) logger.warn?.('proxy-gate: webServer 始终不可用，面板接口未挂载（工具仍可用）')
+      }
+    }, 500)
+    timer.unref?.()
+    register(() => clearInterval(timer))
   }
 
   // ---- 2. 实时状态上下文：两种模式都注入
