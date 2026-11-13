@@ -79,6 +79,29 @@ export function mountProxyApi({ ctx, deps, tools, logger }) {
         respond(200, { ok: true, detected: await detectProxyClients(deps.config) })
         return
       }
+      if (method === 'GET' && route === 'diag') {
+        // 诊断：把 Host 进程里读到的系统代理原始值返回，用于判断宿主是否做了注册表虚拟化。
+        const { readSystemProxy } = await import('./system-proxy.js')
+        const read = await readSystemProxy()
+        respond(200, {
+          ok: true,
+          platform: process.platform,
+          arch: process.arch,
+          execPath: process.execPath,
+          user: process.env.USERNAME ?? '',
+          read,
+        })
+        return
+      }
+      if (route === 'diag-write') {
+        // 诊断：在 Host 进程内直接写一次系统代理并回读，区分「进程权限问题」与「模块代际问题」。
+        const sp = await import('./system-proxy.js')
+        const before = await sp.readSystemProxy()
+        const write = await sp.enableSystemProxy('127.0.0.1:7892')
+        const after = await sp.readSystemProxy()
+        respond(200, { ok: true, before, write, after })
+        return
+      }
       if (method !== 'POST') {
         respond(405, { ok: false, error: `不支持的方法 ${method}` })
         return
@@ -126,7 +149,16 @@ export function mountProxyApi({ ctx, deps, tools, logger }) {
       // 开关、切节点、订阅操作：直接复用工具实现，保证 UI 与模型走同一份逻辑。
       const routeSpec =
         route === 'on'
-          ? { tool: 'proxy', args: { action: 'on', node: str(body.node), upstream: str(body.upstream) } }
+          ? {
+              tool: 'proxy',
+              args: {
+                action: 'on',
+                node: str(body.node),
+                upstream: str(body.upstream),
+                systemProxy: body.systemProxy === true,
+                tun: body.tun === true,
+              },
+            }
           : route === 'off'
             ? { tool: 'proxy', args: { action: 'off', force: body.force !== false } }
             : route === 'node'
@@ -140,7 +172,18 @@ export function mountProxyApi({ ctx, deps, tools, logger }) {
         return
       }
 
-      const message = await tool.execute(routeSpec.args, {})
+      // 人工在面板上动开关 → 自动切到手动模式，避免「人以为是手动、其实 AI 还
+      // 在自主开关」的错乱。这是面板专属行为，智能体走工具不会带 fromUi。
+      let autoNote = ''
+      if (body.fromUi === true && route !== 'subscription') {
+        const autoMode = deps.getAutoMode?.()
+        if (autoMode && typeof deps.setAutoMode === 'function') {
+          deps.setAutoMode(false)
+          autoNote = '已自动切到手动模式（AI 不再自主开关代理）。\n'
+        }
+      }
+
+      const message = `${autoNote}${await tool.execute(routeSpec.args, {})}`
       respond(200, { ok: true, message: String(message ?? ''), state: await snapshot(deps) })
     } catch (error) {
       logger?.warn?.(`proxy-gate: 浏览器接口出错：${error?.message ?? error}`)

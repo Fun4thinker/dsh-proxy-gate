@@ -43,9 +43,11 @@ export async function snapshot({ core, store, config, holds }) {
     running: summary.running,
     mode: summary.mode,
     autoMode: store.autoMode(),
-    /** 引用计数持有者（谁在用代理）。 */
     holders: Array.isArray(holds?.list?.()) ? holds.list() : [],
     holderCount: holds?.size ?? 0,
+    /** 系统代理（穿透）与 TUN 的当前状态。 */
+    systemProxy: summary.systemProxy === true,
+    tun: summary.tun === true,
     port: summary.port,
     controllerPort: summary.controllerPort,
     proxyUrl: summary.proxyUrl,

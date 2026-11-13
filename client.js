@@ -195,6 +195,27 @@ window.__ModuleLoader__.load({
                 : 'AI 看不到代理工具，只能由你在这里控制当前会话的出口。'),
           ),
 
+          // ---- 穿透（仅手动模式）：影响全机
+          state.autoMode
+            ? null
+            : h('div', { className: 'pg-sec' },
+                h('div', { className: 'pg-sec-title' }, '穿透（影响全机，仅手动模式）'),
+                h('div', { className: 'pg-row' },
+                  h('button', {
+                    className: `pg-btn${state.systemProxy ? ' primary' : ''}`,
+                    disabled: Boolean(busy),
+                    onClick: () => actions.toggleSystemProxy(),
+                  }, state.systemProxy ? '系统代理：已开启' : '开启系统代理'),
+                  h('button', {
+                    className: `pg-btn${state.tun ? ' primary' : ''}`,
+                    disabled: Boolean(busy),
+                    onClick: () => actions.toggleTun(),
+                  }, state.tun ? 'TUN：已开启' : '用 TUN 模式'),
+                ),
+                h('div', { className: 'pg-hint' },
+                  '系统代理：写 Windows 的 WinINET 设置，浏览器等程序会走代理；关闭代理时自动还原你原来的设置。TUN：接管全部流量，需要以管理员身份运行 DSH，否则会启动失败。'),
+              ),
+
           h('div', { className: 'pg-sec' },
             h('div', { className: 'pg-sec-title' }, `订阅（${state.subscriptions.length}）`),
             state.subscriptions.length
@@ -341,6 +362,14 @@ window.__ModuleLoader__.load({
         }
       }
 
+      /** 面板只显示摘要：第一行 + 行数提示，避免把整段工具输出糊在面板里。 */
+      const summarise = (text) => {
+        if (!text) return ''
+        const lines = String(text).split('\n').filter((line) => line.trim())
+        if (lines.length <= 2) return lines.join('\n')
+        return `${lines[0]}\n…（共 ${lines.length} 行，完整内容见对话里的工具结果）`
+      }
+
       const running = Boolean(state?.running)
       const modeLabel = state ? (state.autoMode ? '自动' : '手动') : ''
       const stateLabel = state ? (running ? '开启' : '关闭') : '…'
@@ -363,14 +392,23 @@ window.__ModuleLoader__.load({
       }
 
       const actions = {
-        toggle: () => run(running ? 'off' : 'on', running ? { force: true } : {}, running ? '关闭中' : '开启中'),
+        // 面板上的开关一律带 fromUi：Host 会先把模式切成手动，避免 AI 还在自主。
+        toggle: () => run(running ? 'off' : 'on', running ? { force: true, fromUi: true } : { fromUi: true }, running ? '关闭中' : '开启中'),
+        toggleSystemProxy: () =>
+          run(running ? 'off' : 'on', running
+            ? { force: true, fromUi: true }
+            : { fromUi: true, systemProxy: true }, '切换中'),
+        toggleTun: () =>
+          run(running ? 'off' : 'on', running
+            ? { force: true, fromUi: true }
+            : { fromUi: true, tun: true }, '切换中'),
         setAuto: (auto) => run('mode', { auto }, '切换中'),
         useSub: (id) => run('subscription', { action: 'use', value: id }, '切换中'),
         removeSub: (id) => run('subscription', { action: 'remove', value: id }, '移除中'),
         importUrl: (value, done) => run('subscription', { action: 'import', source: 'url', value }, '导入中').then(done),
         importVerge: () => run('subscription', { action: 'import', source: 'clash-verge' }, '导入中'),
-        useNode: (node) => run('node', { node }, '切换中'),
-        borrow: (upstream) => run('on', { upstream: String(upstream) }, '借用中'),
+        useNode: (node) => run('node', { node, fromUi: true }, '切换中'),
+        borrow: (upstream) => run('on', { upstream: String(upstream), fromUi: true }, '借用中'),
       }
 
       const modal = state
@@ -380,7 +418,7 @@ window.__ModuleLoader__.load({
               onMouseDown: (event) => {
                 if (event.target === event.currentTarget) setOpen(false)
               },
-            }, h(Panel, { state, detected, busy, note, noteError, actions, onClose: () => setOpen(false) })),
+            }, h(Panel, { state, detected, busy, note: summarise(note), noteError, actions, onClose: () => setOpen(false) })),
             document.body,
           )
         : null

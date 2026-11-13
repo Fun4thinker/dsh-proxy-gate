@@ -191,6 +191,16 @@ export function buildProxyTools(deps) {
       '已开启时再调用只做「确保开启 + 切换节点」，不会重复起进程。返回后会顺带验证一次真实连通性。',
     parameters: {
       node: { type: 'string', description: '要切换到的节点名（可选，留空用上次或自动选择）' },
+      systemProxy: {
+        type: 'boolean',
+        description:
+          '同时把 Windows 系统代理指向本插件端口，让浏览器等其他程序也走代理（「穿透」模式）。' +
+          '关闭代理时会自动还原原设置。仅手动模式下由人决定是否开启',
+      },
+      tun: {
+        type: 'boolean',
+        description: '用 TUN 模式启动内核（接管全部流量）。需要管理员权限与 wintun 驱动，普通权限会启动失败',
+      },
       upstream: {
         type: 'string',
         description:
@@ -198,12 +208,12 @@ export function buildProxyTools(deps) {
           '给了它就不启动自有内核，AI 直接走那个客户端的本地代理口。留空则按插件配置或自己拉内核。',
       },
     },
-    execute: async ({ node, upstream }, exec) => {
+    execute: async ({ node, upstream, systemProxy, tun }, exec) => {
       const key = holderKey(exec)
       // 借用外部客户端：官方客户端不给订阅时，这是让 AI 用上它的唯一通道。
       const upstreamInput = String(upstream ?? '').trim() || config.upstreamProxy
       if (upstreamInput) {
-        const borrowed = await core.startUpstream({ url: upstreamInput })
+        const borrowed = await core.startUpstream({ url: upstreamInput, systemProxy: systemProxy === true })
         if (!borrowed.ok) return `借用外部代理失败：${borrowed.message}`
         holds.hold(key, { kind: key === 'ui' ? 'ui' : 'agent' })
         void trackNode()
@@ -237,7 +247,12 @@ export function buildProxyTools(deps) {
         return `订阅「${active?.name ?? ''}」的快照文件缺失，请先 proxy_subscription(action="import", source="clash-verge") 重新导入。`
       }
 
-      const result = await core.start({ providerFile, node: node || store.state.selectedNode || '' })
+      const result = await core.start({
+        providerFile,
+        node: node || store.state.selectedNode || '',
+        systemProxy: systemProxy === true,
+        tun: tun === true,
+      })
       if (!result.ok) return `代理开启失败：${result.message}`
       holds.hold(key, { kind: key === 'ui' ? 'ui' : 'agent' })
       store.rememberStarted()
@@ -623,6 +638,12 @@ export function buildProxyTools(deps) {
           '仅当该客户端关闭了系统代理/TUN、只暴露本地 HTTP 口时适用',
       },
       verify: { type: 'boolean', description: 'action="status" 时做「直连 vs 走代理」对照探测（多花几秒）' },
+      systemProxy: {
+        type: 'boolean',
+        description:
+          'action="on" 时同时打开 Windows 系统代理（穿透：浏览器等程序也走代理）。关闭时自动还原原设置',
+      },
+      tun: { type: 'boolean', description: 'action="on" 时用 TUN 模式（接管全部流量，需管理员权限）' },
       force: { type: 'boolean', description: 'action="off" 时强制释放所有持有者并停止代理（仅人工面板使用；智能体不要传它）' },
       showNodes: { type: 'boolean', description: 'action="status" 时列出全部候选节点名（默认只列前 15 个）' },
     },
@@ -630,7 +651,12 @@ export function buildProxyTools(deps) {
     execute: async (args, exec) => {
       const { action } = args
       if (action === 'status') return status.execute({ verify: args.verify, showNodes: args.showNodes })
-      if (action === 'on') return on.execute({ node: args.node, upstream: args.upstream }, exec)
+      if (action === 'on') {
+        return on.execute(
+          { node: args.node, upstream: args.upstream, systemProxy: args.systemProxy, tun: args.tun },
+          exec,
+        )
+      }
       if (action === 'off') return off.execute({ force: args.force === true }, exec)
       return `不认识 action：${action}（可用 status / on / off）`
     },
