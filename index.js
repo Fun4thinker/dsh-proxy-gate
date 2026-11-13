@@ -17,6 +17,7 @@ import { Store } from './src/store.js'
 import { MihomoCore } from './src/mihomo.js'
 import { autoImportFromClashVerge, buildProxyTools, providerForActive } from './src/tools.js'
 import { mountProxyApi } from './src/server.js'
+import { HoldRegistry } from './src/holds.js'
 
 /** Cordis 插件名。 */
 export const name = 'proxy-gate'
@@ -52,6 +53,8 @@ export function apply(ctx, userConfig) {
   autoImportFromClashVerge({ store, logger })
 
   const core = new MihomoCore({ config, paths, logger })
+  /** 代理持有者登记表：进程级共享出口，用引用计数避免「子智能体把主智能体的代理关了」。 */
+  const holds = new HoldRegistry()
   /** 最近一次已知的节点名，供同步的系统提示使用。 */
   const promptState = { node: store.state.selectedNode || '' }
 
@@ -75,7 +78,7 @@ export function apply(ctx, userConfig) {
   // 为什么要能「一个工具都不注册」：工具 schema 是 prompt 前缀的一部分，
   // 增删工具会让整段前缀失效、打断缓存。手动模式下人自己在面板里开关代理，
   // 模型完全不需要这些工具，也就不该为它们付 context 与缓存代价。
-  const deps = { core, store, paths, config, logger, trackNode }
+  const deps = { core, store, paths, config, logger, trackNode, holds }
   const toolList = buildProxyTools(deps)
   const toolByName = new Map(toolList.map((definition) => [definition.name, definition]))
 
@@ -194,7 +197,23 @@ export function apply(ctx, userConfig) {
     }
   }
 
-  // ---- 4. 卸载/退出时别留野进程
+  // ---- 4. 智能体销毁时自动释放它持有的引用，避免引用泄漏把内核一直挂着
+  const onAgentDisposed = ({ agent }) => {
+    const id = typeof agent?.id === 'string' ? agent.id : ''
+    if (!id) return
+    if (!holds.release(id)) return
+    logger.info?.(`proxy-gate: 智能体 ${id} 已退出，释放其代理引用（剩余 ${holds.size}）`)
+    if (!holds.hasAny && core.running) {
+      void core.stop('holder-disposed').then(() => trackNode())
+    }
+  }
+  try {
+    ctx.on?.('agent/disposed', onAgentDisposed)
+  } catch (error) {
+    logger.warn?.(`proxy-gate: 注册 agent/disposed 监听失败：${error?.message ?? error}`)
+  }
+
+  // ---- 5. 卸载/退出时别留野进程
   const exitHandler = () => {
     try {
       core.child?.kill()
@@ -252,7 +271,8 @@ function buildGuidance(config) {
     '必须知道的限制：',
     '- 内置的 web_fetch / web_search 走宿主进程自己的 HTTP 栈，**不经过本代理**。遇到境外页面抓不下来时，改用 proxy_fetch 或 pwsh 里的 curl。',
     '- 国内站点、内网地址不要走代理（no_proxy 已配好 localhost/127.0.0.1）。',
-    '- 端口被占用（例如 Clash Verge 自己占着 7897）时 开启会报错并说明，不要反复重试。',
+    '- 端口被占用（例如 Clash Verge 自己占着 7897）时开启会报错并说明，不要反复重试。',
+    '- 出口是进程级共享的：主智能体、队友、子智能体共用一个出口，按引用计数管理。你 off 只释放自己那一份，别人还在用时代理保持开启。',
     '',
     '排错姿势：',
     '- 开了代理却全部不通：先看 proxy(action="status") 是否提示「占位节点」（机场超量/到期会下发假节点）；必要时 proxy_subscription(action="refresh") 重新拉订阅。',

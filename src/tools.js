@@ -82,6 +82,14 @@ export function buildProxyTools(deps) {
   const { core, store, paths, config } = deps
   const logger = deps.logger ?? console
   const trackNode = typeof deps.trackNode === 'function' ? deps.trackNode : () => {}
+  /** 持有者登记表（引用计数）。没有传进来时退化成单持有者，行为与旧版一致。 */
+  const holds = deps.holds ?? { hold: () => true, release: () => false, releaseAll: () => 0, hasAny: false, size: 0, list: () => [] }
+
+  /** 当前调用者是哪个持有者：智能体用 session id，人工/接口用 'ui'。 */
+  const holderKey = (exec) => {
+    const id = exec?.agent?.id
+    return typeof id === 'string' && id ? String(id) : 'ui'
+  }
 
   const status = defineTool({
     name: 'proxy#status',
@@ -190,12 +198,14 @@ export function buildProxyTools(deps) {
           '给了它就不启动自有内核，AI 直接走那个客户端的本地代理口。留空则按插件配置或自己拉内核。',
       },
     },
-    execute: async ({ node, upstream }) => {
+    execute: async ({ node, upstream }, exec) => {
+      const key = holderKey(exec)
       // 借用外部客户端：官方客户端不给订阅时，这是让 AI 用上它的唯一通道。
       const upstreamInput = String(upstream ?? '').trim() || config.upstreamProxy
       if (upstreamInput) {
         const borrowed = await core.startUpstream({ url: upstreamInput })
         if (!borrowed.ok) return `借用外部代理失败：${borrowed.message}`
+        holds.hold(key, { kind: key === 'ui' ? 'ui' : 'agent' })
         void trackNode()
         const check = await probe(config.testUrls[0], { timeoutMs: 20000, proxyUrl: core.proxyUrl })
         const lines = [borrowed.message, `出口：${core.proxyUrl}（HTTP_PROXY / ALL_PROXY 已写入，子进程自动继承）`]
@@ -204,7 +214,7 @@ export function buildProxyTools(deps) {
             ? `连通性验证：走 ${core.proxyUrl} 访问 ${config.testUrls[0]} ${check.ok ? '成功' : '链路通（站点返回非 2xx）'}（HTTP ${check.status}，${check.ms}ms）`
             : `连通性验证：走 ${core.proxyUrl} 访问 ${config.testUrls[0]} 失败（${check.error ?? '未知'}）。请确认那个客户端当前是「已连接」状态、且它的代理口确实是 HTTP 而不是 SOCKS-only。`,
         )
-        lines.push('', '抓取自外页面/JSON 用 proxy_fetch；pwsh 里的 curl/git/npm 会自动走这个出口。收尾记得 proxy_off。')
+        lines.push('', '抓取自外页面/JSON 用 proxy_fetch；pwsh 里的 curl/git/npm 会自动走这个出口。收尾记得 proxy(action="off")。')
         return lines.join('\n')
       }
 
@@ -229,6 +239,7 @@ export function buildProxyTools(deps) {
 
       const result = await core.start({ providerFile, node: node || store.state.selectedNode || '' })
       if (!result.ok) return `代理开启失败：${result.message}`
+      holds.hold(key, { kind: key === 'ui' ? 'ui' : 'agent' })
       store.rememberStarted()
       const lines = [`${result.message}`, `订阅：${active.name}（约 ${count} 个节点）`]
       const group = await core.group()
@@ -275,19 +286,42 @@ export function buildProxyTools(deps) {
 
   const off = defineTool({
     name: 'proxy#off',
-    description:
-      '关闭代理：停止本地内核并还原环境变量。任务完成、或确认后续请求只需要国内网络时调用，避免把本可直接访问的请求绕出去。' +
-      '重复调用是安全的（已经是关闭状态时只回一句说明）。',
-    parameters: {},
-    execute: async () => {
+    description: '关闭代理（释放自己持有的引用，计数归零才真正停内核）。',
+    parameters: {
+      force: { type: 'boolean', description: '强制释放所有持有者并停止代理（人工面板用；智能体不要用它）' },
+    },
+    execute: async ({ force }, exec) => {
+      const key = holderKey(exec)
+      if (force) {
+        const released = holds.releaseAll()
+        if (!core.running) {
+          core.restoreEnv()
+          return `已清空 ${released} 个持有记录；代理本来就是关闭状态。`
+        }
+        const port = core.config.port
+        await core.stop('force-off')
+        void trackNode()
+        return `已强制关闭代理（127.0.0.1:${port} 已停止，环境变量已还原）。`
+      }
+
+      const released = holds.release(key)
       if (!core.running) {
         core.restoreEnv()
         return '代理本来就是关闭状态，未做改动。'
       }
+      if (holds.hasAny) {
+        const others = holds.list().map((item) => item.label)
+        return (
+          `已释放你（${key}）的代理引用。` +
+          `还有 ${holds.size} 个持有者在使用：${others.join('、')}，因此**代理保持开启**。`
+        )
+      }
       const port = core.config.port
-      await core.stop()
+      await core.stop('last-holder-released')
       void trackNode()
-      return `代理已关闭（127.0.0.1:${port} 已停止，环境变量已还原）。`
+      return released
+        ? `已释放你的代理引用，没有其他持有者了，代理已关闭（127.0.0.1:${port} 已停止，环境变量已还原）。`
+        : `代理已关闭（127.0.0.1:${port} 已停止，环境变量已还原）。`
     },
   })
 
@@ -575,9 +609,10 @@ export function buildProxyTools(deps) {
     description:
       '开关代理并查看状态。action="status" 看当前是否开启、走的哪个节点、有哪些订阅；' +
       'action="on" 开启（必要时自动拉起本地内核），可带 node 指定节点；' +
-      'action="off" 关闭并还原环境变量。' +
+      'action="off" 释放自己持有的引用，引用归零时才真正关闭。' +
       '访问境外资源失败/超时/被拦截，或任务明确需要国外网络时先 on 再重试，收尾 off。' +
-      '状态是**整个进程共享**的：同一个 DSH 里的其他智能体（含子智能体）看到并使用的是同一个出口。',
+      '出口是**进程级共享**的：同一 DSH 里的主智能体、队友、子智能体共用一个出口，用引用计数管理——' +
+      '你 off 只释放自己那份，别人还在用时代理会保持开启；智能体结束时会自动释放你持有的引用。',
     parameters: {
       action: { type: 'string', required: true, enum: ['status', 'on', 'off'], description: '要执行的操作' },
       node: { type: 'string', description: 'action="on" 时要使用的节点名；已开启时传它即切换节点。留空用上次的节点或自动选择' },
@@ -588,13 +623,15 @@ export function buildProxyTools(deps) {
           '仅当该客户端关闭了系统代理/TUN、只暴露本地 HTTP 口时适用',
       },
       verify: { type: 'boolean', description: 'action="status" 时做「直连 vs 走代理」对照探测（多花几秒）' },
+      force: { type: 'boolean', description: 'action="off" 时强制释放所有持有者并停止代理（仅人工面板使用；智能体不要传它）' },
       showNodes: { type: 'boolean', description: 'action="status" 时列出全部候选节点名（默认只列前 15 个）' },
     },
     timeoutMs: 300000,
-    execute: async ({ action, node, upstream, verify, showNodes }) => {
-      if (action === 'status') return status.execute({ verify, showNodes })
-      if (action === 'on') return on.execute({ node, upstream })
-      if (action === 'off') return off.execute()
+    execute: async (args, exec) => {
+      const { action } = args
+      if (action === 'status') return status.execute({ verify: args.verify, showNodes: args.showNodes })
+      if (action === 'on') return on.execute({ node: args.node, upstream: args.upstream }, exec)
+      if (action === 'off') return off.execute({ force: args.force === true }, exec)
       return `不认识 action：${action}（可用 status / on / off）`
     },
   })

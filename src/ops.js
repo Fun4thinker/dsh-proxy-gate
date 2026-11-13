@@ -14,7 +14,7 @@ import { detectClashVerge } from './subscription.js'
  * @param {{core: any, store: any, config: any}} deps
  * @returns {Promise<object>}
  */
-export async function snapshot({ core, store, config }) {
+export async function snapshot({ core, store, config, holds }) {
   const summary = core.summary()
   const active = store.active()
   const latencies = store.latencies()
@@ -43,6 +43,9 @@ export async function snapshot({ core, store, config }) {
     running: summary.running,
     mode: summary.mode,
     autoMode: store.autoMode(),
+    /** 引用计数持有者（谁在用代理）。 */
+    holders: Array.isArray(holds?.list?.()) ? holds.list() : [],
+    holderCount: holds?.size ?? 0,
     port: summary.port,
     controllerPort: summary.controllerPort,
     proxyUrl: summary.proxyUrl,

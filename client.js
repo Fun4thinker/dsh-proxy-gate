@@ -54,8 +54,11 @@ window.__ModuleLoader__.load({
 .pg-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dsw-alias-state-idle-primary); }
 /* 手动 + 开启：绿灯常亮 */
 .pg-dot.on { background: var(--dsw-alias-state-success-primary); }
-/* 自动 + 关闭：蓝灯（用品牌色） */
-.pg-dot.auto-off { background: var(--dsw-alias-brand-primary); }
+/* 自动 + 关闭：天蓝（主题里没有「信息蓝」token，这里用固定天蓝并按明暗各给一档） */
+.pg-dot.auto-off { background: #38bdf8; }
+@media (prefers-color-scheme: dark) {
+  .pg-dot.auto-off { background: #7dd3fc; }
+}
 /* 自动 + 开启：绿色呼吸灯 */
 .pg-dot.breath {
   background: var(--dsw-alias-state-success-primary);
@@ -273,6 +276,10 @@ window.__ModuleLoader__.load({
           ),
 
           state.lastError ? h('div', { className: 'pg-note err' }, state.lastError) : null,
+          state.holderCount > 1
+            ? h('div', { className: 'pg-hint' },
+                `当前有 ${state.holderCount} 个持有者在使用这个出口：${state.holders.map((item) => item.label).join('、')}。智能体自己 off 只会释放它那一份。`)
+            : null,
           note ? h('div', { className: `pg-note${noteError ? ' err' : ''}` }, note) : null,
         ),
       )
@@ -356,7 +363,7 @@ window.__ModuleLoader__.load({
       }
 
       const actions = {
-        toggle: () => run(running ? 'off' : 'on', {}, running ? '关闭中' : '开启中'),
+        toggle: () => run(running ? 'off' : 'on', running ? { force: true } : {}, running ? '关闭中' : '开启中'),
         setAuto: (auto) => run('mode', { auto }, '切换中'),
         useSub: (id) => run('subscription', { action: 'use', value: id }, '切换中'),
         removeSub: (id) => run('subscription', { action: 'remove', value: id }, '移除中'),

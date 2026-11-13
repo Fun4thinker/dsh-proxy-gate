@@ -128,7 +128,7 @@ export function mountProxyApi({ ctx, deps, tools, logger }) {
         route === 'on'
           ? { tool: 'proxy', args: { action: 'on', node: str(body.node), upstream: str(body.upstream) } }
           : route === 'off'
-            ? { tool: 'proxy', args: { action: 'off' } }
+            ? { tool: 'proxy', args: { action: 'off', force: body.force !== false } }
             : route === 'node'
               ? { tool: 'proxy', args: { action: 'on', node: str(body.node) } }
               : route === 'subscription'
