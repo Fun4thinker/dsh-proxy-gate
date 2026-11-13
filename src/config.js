@@ -36,6 +36,10 @@ export const DEFAULT_CONFIG = {
   fetchTimeoutMs: 30000,
   /** 内核启动后等待端口就绪的上限。 */
   readyTimeoutMs: 15000,
+  /** 节点不通时自动换下一个可用节点（不要在任务里卡死）。 */
+  autoFailover: true,
+  /** 自动换节点最多尝试几个候选。 */
+  failoverMaxTries: 3,
   /** 状态目录；空 = $DSH_HOME/proxy-gate。 */
   storeDir: '',
   /**
@@ -75,6 +79,8 @@ export function resolveConfig(userConfig) {
     testUrls: toUrlList(config.testUrls, DEFAULT_CONFIG.testUrls),
     fetchTimeoutMs: toPositiveInt(config.fetchTimeoutMs, DEFAULT_CONFIG.fetchTimeoutMs),
     readyTimeoutMs: toPositiveInt(config.readyTimeoutMs, DEFAULT_CONFIG.readyTimeoutMs),
+    autoFailover: config.autoFailover !== false,
+    failoverMaxTries: toPositiveInt(config.failoverMaxTries, DEFAULT_CONFIG.failoverMaxTries),
   }
 }
 

@@ -7,6 +7,7 @@
 
 import { analyzeNodes, detectOpenProxyPorts } from './mihomo.js'
 import { detectClashVerge } from './subscription.js'
+import { probe } from './net.js'
 
 /**
  * 生成一次完整的状态快照（面板与 proxy_status 共用）。
@@ -86,6 +87,80 @@ export async function snapshot({ core, store, config, holds }) {
     clashVergeDetected: Boolean(detectClashVerge()),
     upstreamCandidates: summary.running ? [] : await detectOpenProxyPorts(config.upstreamPorts),
     testUrls: config.testUrls,
+  }
+}
+
+/**
+ * 自动故障转移：换到一个**真的能用**的节点。
+ *
+ * 触发时机有两个：
+ *   1. 开启代理后连通性验证失败（当前节点是死的）；
+ *   2. proxy_fetch 请求失败（节点半路挂了）。
+ *
+ * 策略：候选 = 非占位、非 DIRECT、非当前节点；优先用已测速且通的节点，按延迟
+ * 升序，最多试 maxTries 个。每换一个都做一次真实请求验证，成功才留下。
+ *
+ * @param {{core: any, store: any, config: any, exclude?: string[], maxTries?: number, timeoutMs?: number, logger?: any}} input
+ * @returns {Promise<{ok: boolean, node?: string, tried: Array<{name: string, ok: boolean, ms?: number, error?: string}>, message: string}>}
+ */
+export async function failoverToWorkingNode({
+  core,
+  store,
+  config,
+  exclude = [],
+  maxTries = 3,
+  timeoutMs = 20000,
+  logger,
+}) {
+  if (!core.running || core.mode === 'borrow') {
+    return { ok: false, tried: [], message: '只有自有内核模式才能自动换节点' }
+  }
+  const group = await core.group()
+  const analysis = analyzeNodes(group.nodes)
+  const latencies = store.latencies()
+  const skip = new Set([...exclude, group.node, 'DIRECT'])
+
+  const candidates = analysis.real
+    .filter((name) => !skip.has(name))
+    .map((name) => ({ name, delay: Number.isFinite(latencies[name]?.delay) ? latencies[name].delay : null }))
+    // 已测速且通的优先，其次未测过的；延迟升序
+    .sort((a, b) => (a.delay ?? 1e9) - (b.delay ?? 1e9))
+    .slice(0, Math.max(1, maxTries))
+
+  if (!candidates.length) {
+    return {
+      ok: false,
+      tried: [],
+      message: '没有可切换的候选节点（订阅里可能全是占位节点，先 proxy_subscription(action="refresh") 或 proxy_nodes(action="test")）',
+    }
+  }
+
+  const tried = []
+  for (const candidate of candidates) {
+    const switched = await core.switchNode(candidate.name)
+    if (!switched.applied) {
+      tried.push({ name: candidate.name, ok: false, error: switched.error ?? '切换失败' })
+      continue
+    }
+    const check = await probe(config.testUrls[0], { proxyUrl: core.proxyUrl, timeoutMs })
+    if (check.reached) {
+      store.rememberNode(candidate.name)
+      tried.push({ name: candidate.name, ok: true, ms: check.ms })
+      logger?.info?.(`proxy-gate: 自动故障转移到「${candidate.name}」（${check.ms}ms）`)
+      return {
+        ok: true,
+        node: candidate.name,
+        tried,
+        message: `已自动切换到可用节点「${candidate.name}」（连通性 ${check.status}，${check.ms}ms）`,
+      }
+    }
+    tried.push({ name: candidate.name, ok: false, error: check.error ?? '不通' })
+  }
+
+  return {
+    ok: false,
+    tried,
+    message: `试了 ${tried.length} 个节点都不通：${tried.map((item) => `${item.name}（${item.error}）`).join('；')}。建议 proxy_nodes(action="test") 全量测速，或更新订阅。`,
   }
 }
 

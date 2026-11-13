@@ -234,6 +234,40 @@ export function apply(ctx, userConfig) {
     }
   }
 
+  // ---- 3. 健康守护：内核意外退出时自动重启一次（有冷却，避免崩溃循环）
+  let restartAttempts = 0
+  let lastRestartAt = 0
+  core.onUnexpectedExit = () => {
+    if (!holds.hasAny) {
+      logger.info?.('proxy-gate: 内核意外退出，但没有持有者，不自动重启')
+      return
+    }
+    const now = Date.now()
+    // 5 分钟内最多重启 3 次
+    if (now - lastRestartAt > 300000) restartAttempts = 0
+    if (restartAttempts >= 3) {
+      logger.warn?.('proxy-gate: 内核反复意外退出，已停止自动重启（避免崩溃循环）')
+      return
+    }
+    restartAttempts += 1
+    lastRestartAt = now
+    logger.warn?.(`proxy-gate: 内核意外退出，第 ${restartAttempts} 次自动重启…`)
+    setTimeout(() => {
+      const prepared = providerForActive({ store, paths })
+      if (!prepared.providerFile) {
+        logger.warn?.('proxy-gate: 自动重启缺少可用订阅，放弃')
+        return
+      }
+      void core
+        .start({ providerFile: prepared.providerFile, node: store.state.selectedNode || '' })
+        .then((result) => {
+          logger.info?.(`proxy-gate: 自动重启${result.ok ? '成功' : `失败：${result.message}`}`)
+          return trackNode()
+        })
+        .catch((error) => logger.warn?.(`proxy-gate: 自动重启异常：${error?.message ?? error}`))
+    }, 800).unref?.()
+  }
+
   // ---- 4. 智能体销毁时自动释放它持有的引用，避免引用泄漏把内核一直挂着
   const onAgentDisposed = ({ agent }) => {
     const id = typeof agent?.id === 'string' ? agent.id : ''

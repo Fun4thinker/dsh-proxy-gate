@@ -18,7 +18,7 @@ import path from 'node:path'
 import { defineTool } from './tool-kit.js'
 import { detectClashVerge, importFromClashVerge, inspectSubscriptionText, parseVergeProfiles } from './subscription.js'
 import { analyzeNodes, PROVIDER_ID, resolveCorePath } from './mihomo.js'
-import { measureNodes, snapshot } from './ops.js'
+import { measureNodes, snapshot, failoverToWorkingNode } from './ops.js'
 import { fetchText, probe, SUBSCRIPTION_USER_AGENT } from './net.js'
 import { safeId } from './store.js'
 
@@ -293,13 +293,33 @@ export function buildProxyTools(deps) {
             : `连通性验证：隧道是通的，但目标站点返回 HTTP ${check.status}（限流/拒绝，非代理故障）。`,
         )
       } else {
-        lines.push(
-          `连通性验证：走代理访问 ${verifyUrl} 失败（${check.error ?? '未知'}）。` +
-            `${analysis.placeholder.length && !analysis.real.length ? '这份订阅的节点全是占位节点，请先重置/续费机场并 proxy_subscription(action="refresh")。' : '可换节点：proxy_on(node="节点名")，或用 proxy_status(verify=true) 对比直连。'}`,
-        )
+        lines.push(`连通性验证：走代理访问 ${verifyUrl} 失败（${check.error ?? '未知'}）——当前节点不可用。`)
+        // P0 自动故障转移：节点死了就自己换一个能用的，别让任务卡在这里
+        if (config.autoFailover && analysis.real.length > 1) {
+          lines.push('正在自动换节点…')
+          const failover = await failoverToWorkingNode({
+            core,
+            store,
+            config,
+            exclude: group.node ? [group.node] : [],
+            maxTries: config.failoverMaxTries,
+            logger,
+          })
+          lines.push(failover.ok ? `✅ ${failover.message}` : `❌ 自动换节点失败：${failover.message}`)
+          if (failover.ok) {
+            const after = await core.group()
+            lines.push(`当前节点已更新为：${after.node}`)
+          }
+        } else if (!analysis.real.length) {
+          lines.push(
+            analysis.placeholder.length
+              ? '这份订阅看起来全是占位节点（机场超量/到期），请续费后 proxy_subscription(action="refresh")。'
+              : '没有可切换的候选节点。',
+          )
+        }
       }
       if (!analysis.real.length && analysis.hasDirect) {
-        lines.push('诊断建议：proxy_on(node="DIRECT") 可验证本地隧道本身是否正常（此时流量直连，不走节点）。')
+        lines.push('诊断建议：proxy(action="on", node="DIRECT") 可验证本地隧道本身是否正常（此时流量直连，不走节点）。')
       }
       void trackNode()
       lines.push(
@@ -612,15 +632,37 @@ export function buildProxyTools(deps) {
     execute: async ({ url, maxChars, timeoutMs, userAgent }) => {
       if (!/^https?:\/\//i.test(String(url ?? ''))) return 'url 必须是 http(s) 地址。'
       if (!core.running) {
-        return `代理当前是关闭的，无法走代理抓取 ${url}。请先调用 proxy_on，再重试本工具。`
+        return `代理当前是关闭的，无法走代理抓取 ${url}。请先调用 proxy(action="on")，再重试本工具。`
       }
-      const result = await fetchText(url, {
+      const options = {
         proxyUrl: core.proxyUrl,
         timeoutMs: timeoutMs ?? config.fetchTimeoutMs,
         maxChars: maxChars ?? 60000,
         userAgent,
-      })
-      const header = `URL: ${url}\n状态: ${result.status}${result.ok ? '' : `（失败：${result.error ?? '未知'}）`}\n耗时: ${result.ms}ms${result.truncated ? '｜正文已截断' : ''}`
+      }
+      let result = await fetchText(url, options)
+      let failoverNote = ''
+
+      // P0 自动故障转移：请求失败就换节点再试一次，而不是把失败直接丢回去
+      if (!result.reached && config.autoFailover && core.mode === 'core') {
+        const failover = await failoverToWorkingNode({
+          core,
+          store,
+          config,
+          exclude: store.state.selectedNode ? [store.state.selectedNode] : [],
+          maxTries: config.failoverMaxTries,
+          logger,
+        })
+        if (failover.ok) {
+          failoverNote = `\n切换节点：已自动切到「${failover.node}」后重试`
+          result = await fetchText(url, { ...options, proxyUrl: core.proxyUrl })
+          void trackNode()
+        } else {
+          failoverNote = `\n切换节点：自动换节点未成功（${failover.message}）`
+        }
+      }
+
+      const header = `URL: ${url}\n状态: ${result.status}${result.ok ? '' : `（失败：${result.error ?? '未知'}）`}\n耗时: ${result.ms}ms${result.truncated ? '｜正文已截断' : ''}${failoverNote}`
       return `${header}\n\n${result.body || '(空响应)'}`
     },
     isConcurrencySafe: () => true,

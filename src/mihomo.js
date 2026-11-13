@@ -413,6 +413,8 @@ export class MihomoCore {
     this.systemProxyOn = false
     /** 本次是否用 TUN 模式启动。 */
     this.tunOn = false
+    /** 内核意外退出时的回调（由插件层提供，用于自动重启）。 */
+    this.onUnexpectedExit = null
   }
 
   /** 往 runtime/lifecycle.log 追加一行，方便事后判断内核为什么没了。 */
@@ -581,6 +583,13 @@ export class MihomoCore {
         fs.rmSync(this.paths.pidFile, { force: true })
       } catch {
         /* 无关紧要 */
+      }
+      if (unexpected) {
+        try {
+          this.onUnexpectedExit?.({ code, signal })
+        } catch (error) {
+          this.logger?.warn?.(`proxy-gate: 意外退出回调出错：${error?.message ?? error}`)
+        }
       }
     })
     if (logFd !== null) {
