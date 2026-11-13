@@ -476,6 +476,7 @@ export class MihomoCore {
     this.borrowUrl = normalized
     this.startedAt = Date.now()
     this.applyEnv()
+    this.lastError = ''
     let systemNote = ''
     if (systemProxy === true) {
       const applied = await this.applySystemProxy()
@@ -625,6 +626,9 @@ export class MihomoCore {
     // provider 是异步加载的：不等它就去切节点，会误判「没有这个节点」。
     const providerNodes = await this.waitProviders()
     const switched = await this.switchNode(node || selectedNode || '')
+    // 启动成功 = 上一次的错误已经不再是「当前状态」，清掉它，
+    // 否则面板会一直挂着一条过期的「内核意外退出」（自己修好了还吓人）。
+    this.lastError = ''
     /** 系统代理（穿透）——失败不回滚内核，只如实报告。 */
     let systemNote = ''
     if (systemProxy === true) {
