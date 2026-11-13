@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="Proxy gate">
+  <defs>
+    <linearGradient id="pgBg" x1="6" y1="4" x2="42" y2="44" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2F6BFF"/>
+      <stop offset="1" stop-color="#12B3A0"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="46" height="46" rx="12" fill="url(#pgBg)"/>
+  <path d="M24 7.5 L37.5 12.4 V23.6 C37.5 31.8 31.9 37.6 24 41 C16.1 37.6 10.5 31.8 10.5 23.6 V12.4 Z"
+        fill="none" stroke="#FFFFFF" stroke-width="2.4" stroke-linejoin="round"/>
+  <circle cx="24" cy="23.2" r="7.4" fill="none" stroke="#FFFFFF" stroke-width="1.9" opacity="0.95"/>
+  <ellipse cx="24" cy="23.2" rx="3.1" ry="7.4" fill="none" stroke="#FFFFFF" stroke-width="1.5" opacity="0.85"/>
+  <path d="M16.6 23.2 H31.4" stroke="#FFFFFF" stroke-width="1.5" opacity="0.85" stroke-linecap="round"/>
+  <path d="M6.5 34.5 C15 33 31 27 41.5 15.5" fill="none" stroke="#FFFFFF" stroke-width="2.2"
+        stroke-linecap="round" opacity="0.9"/>
+  <path d="M37 15 L42.6 14.2 L38.6 19.4" fill="none" stroke="#FFFFFF" stroke-width="2.2"
+        stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+</svg>

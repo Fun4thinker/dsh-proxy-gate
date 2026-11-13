@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Proxy gate",
+    "description": "Lets the agent switch a proxy on and off: imports Clash Verge subscriptions into DSH, starts a local mihomo core on demand, and routes its shell and fetch calls through it."
+  }
+}

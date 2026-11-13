@@ -1,0 +1,10 @@
+# 运行时与本地产物
+.smoke/
+node_modules/
+*.log
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

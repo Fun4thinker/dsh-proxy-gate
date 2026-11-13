@@ -1,0 +1,38 @@
+# dsh-proxy-gate 的 Loader patch 层：只插入一行，把插件挂进 Host。
+#
+# 下面每一项都是可选的，可以在你自己的 profile patch（同 id 覆盖）里改：
+#   enabled                  总开关，false 时插件不注册任何工具
+#   port                     本地 mixed 代理端口（HTTP/SOCKS 共用），默认 7892
+#   controllerPort           mihomo 控制端口（仅监听 127.0.0.1），默认 7893
+#   corePath                 内核可执行文件路径；留空 = 自动探测 Clash Verge / PATH
+#   autoStart                插件加载时自动拉起代理（默认 false，按需开启）
+#   noProxy                  不走代理的地址列表
+#   healthCheckUrl           节点测速 URL
+#   testUrls                 proxy_status(verify) 用来验证连通性的 URL 列表
+#   upstreamProxy            借用本机已运行代理客户端的端口（跨界云等官方客户端），
+#                            如 '7897'；留空 = 自己拉 mihomo 内核
+#   upstreamPorts            自动探测外部客户端端口时依次尝试的端口
+#   promptGuidance           是否向系统提示注入「何时该开代理」的指引
+- insert:
+    - id: proxy-gate
+      name: dsh-proxy-gate
+      config:
+        enabled: true
+        port: 7892
+        controllerPort: 7893
+        corePath: ''
+        autoStart: false
+        noProxy: 'localhost,127.0.0.1,::1,.local'
+        healthCheckUrl: 'https://www.gstatic.com/generate_204'
+        testUrls:
+          - 'https://www.gstatic.com/generate_204'
+          - 'https://api.github.com/zen'
+        upstreamProxy: ''
+        upstreamPorts:
+          - 7897
+          - 7890
+          - 10808
+          - 10809
+          - 1080
+        promptGuidance: true
+        liveStateContext: true

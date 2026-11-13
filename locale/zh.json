@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "代理网关",
+    "description": "让智能体自己开关代理：把 Clash Verge 等订阅导入 DSH，按需拉起本地 mihomo 内核，并让联网任务自动走代理。"
+  }
+}
