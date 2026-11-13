@@ -115,13 +115,16 @@ export function mountProxyApi({ ctx, deps, tools, logger }) {
           return
         }
         const enabled = deps.setAutoMode(body.auto === true)
-        respond(200, {
-          ok: true,
-          message: enabled
-            ? '已开启自动模式：AI 现在可以自己开关代理。'
-            : '已关闭自动模式：AI 看不到代理工具，请在上方面板里手动开关。',
-          state: await snapshot(deps),
-        })
+        const state = await snapshot(deps)
+        let message = enabled
+          ? '已开启自动模式：AI 现在可以自己开关代理。'
+          : '已关闭自动模式：AI 看不到代理工具，请在上方面板里手动开关。'
+        if (enabled && state.running && state.manualHold) {
+          message +=
+            '\n注意：当前出口是你在面板上开的（人工持有），AI 无法关闭它；' +
+            '它会一直保持开启，直到你在面板上点「关闭」。'
+        }
+        respond(200, { ok: true, message, state })
         return
       }
 

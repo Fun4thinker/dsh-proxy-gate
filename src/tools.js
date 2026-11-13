@@ -85,7 +85,11 @@ export function buildProxyTools(deps) {
   /** 持有者登记表（引用计数）。没有传进来时退化成单持有者，行为与旧版一致。 */
   const holds = deps.holds ?? { hold: () => true, release: () => false, releaseAll: () => 0, hasAny: false, size: 0, list: () => [] }
 
-  /** 当前调用者是哪个持有者：智能体用 session id，人工/接口用 'ui'。 */
+  /**
+   * 当前调用者是哪个持有者：
+   *  - 智能体走工具 → 用它的 session id（各自独立，互不影响）
+   *  - 面板/命令行（无 agent）→ 统一记成 'ui'（人工持有）
+   */
   const holderKey = (exec) => {
     const id = exec?.agent?.id
     return typeof id === 'string' && id ? String(id) : 'ui'
@@ -127,6 +131,14 @@ export function buildProxyTools(deps) {
         )
       }
       lines.push(`已导入订阅数：${store.list().length}`)
+
+      const holders = holds.list()
+      if (holders.length) {
+        lines.push(
+          `持有者（${holders.length}）：${holders.map((item) => item.label).join('、')}` +
+            (holds.hasManual ? '——其中「人工面板」是人在面板上开的，AI 的 off 关不掉它' : ''),
+        )
+      }
 
       if (summary.mode === 'core') {
         const group = await core.group()
@@ -326,9 +338,9 @@ export function buildProxyTools(deps) {
       }
       if (holds.hasAny) {
         const others = holds.list().map((item) => item.label)
+        const manual = holds.hasManual ? '（其中「人工面板」那份是人在面板上开的，AI 关不掉它）' : ''
         return (
-          `已释放你（${key}）的代理引用。` +
-          `还有 ${holds.size} 个持有者在使用：${others.join('、')}，因此**代理保持开启**。`
+          `已释放你的代理引用。还有 ${holds.size} 个持有者在使用：${others.join('、')}${manual}，因此**代理保持开启**。`
         )
       }
       const port = core.config.port

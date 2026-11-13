@@ -72,6 +72,34 @@ window.__ModuleLoader__.load({
   .pg-dot.breath { animation: none; opacity: 1; }
 }
 .pg-dot.warn { background: var(--dsw-alias-state-warn-primary); }
+/* 加载中：小转圈，替代状态点 */
+.pg-spin {
+  width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto;
+  border: 1.5px solid var(--dsw-alias-border-l2);
+  border-top-color: var(--dsw-alias-brand-primary);
+  animation: pg-spin .7s linear infinite;
+}
+@keyframes pg-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .pg-spin { animation: none; border-top-color: var(--dsw-alias-state-idle-primary); }
+}
+/* 顶部进度条：不确定态，避免假装知道进度 */
+.pg-progress {
+  height: 2px; margin: -1px 0 0; border-radius: 1px; overflow: hidden;
+  background: var(--dsw-alias-border-l1);
+}
+.pg-progress::after {
+  content: ''; display: block; height: 100%; width: 40%;
+  background: var(--dsw-alias-brand-primary);
+  animation: pg-slide 1.1s ease-in-out infinite;
+}
+@keyframes pg-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pg-progress::after { animation: none; width: 100%; opacity: .5; }
+}
 
 .pg-backdrop {
   position: fixed; inset: 0; z-index: 2147482000;
@@ -164,19 +192,22 @@ window.__ModuleLoader__.load({
       const ports = detected?.ports ?? state.upstreamCandidates ?? []
       const clients = detected?.clients ?? []
 
-      return h('div', { className: 'pg-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': '代理网关' },
+      return h('div', { className: 'pg-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': '代理网关', 'aria-busy': busy ? 'true' : 'false' },
+        busy ? h('div', { className: 'pg-progress' }) : null,
         h('div', { className: 'pg-head' },
-          h('span', { className: dotClass(state) }),
+          busy ? h('span', { className: 'pg-spin' }) : h('span', { className: dotClass(state) }),
           h('span', { className: 'pg-head-title' }, '代理网关'),
           h('span', { className: 'pg-head-meta' },
-            [
-              state.autoMode ? '自动' : '手动',
-              state.running ? '已开启' : '已关闭',
-              state.mode === 'borrow' ? `借用 ${state.borrowUrl}` : state.mode === 'core' ? `节点 ${state.node || '自动'}` : '',
-            ].filter(Boolean).join(' · ')),
+            busy
+              ? `${busy}…（首次开启需要拉起内核并加载节点，通常 3–10 秒）`
+              : [
+                  state.autoMode ? '自动' : '手动',
+                  state.running ? '已开启' : '已关闭',
+                  state.mode === 'borrow' ? `借用 ${state.borrowUrl}` : state.mode === 'core' ? `节点 ${state.node || '自动'}` : '',
+                ].filter(Boolean).join(' · ')),
           h('button', { className: 'pg-btn primary', disabled: Boolean(busy), onClick: () => actions.toggle() },
-            state.running ? '关闭' : '开启'),
-          h('button', { className: 'pg-btn', onClick: onClose }, '关闭面板'),
+            busy ? busy : state.running ? '关闭' : '开启'),
+          h('button', { className: 'pg-btn', disabled: Boolean(busy), onClick: onClose }, '关闭面板'),
         ),
         h('div', { className: 'pg-body' },
 
@@ -193,6 +224,12 @@ window.__ModuleLoader__.load({
               state.autoMode
                 ? 'AI 能自己开关代理（会遇到境外任务时自动开、收尾自动关）。工具集恒定，只切换模式时才变。'
                 : 'AI 看不到代理工具，只能由你在这里控制当前会话的出口。'),
+            state.running && state.manualHold
+              ? h('div', { className: 'pg-hint', style: { marginTop: '4px' } },
+                  state.autoMode
+                    ? '⚠️ 当前出口是你在面板上开的（人工持有）：AI 关不掉它，会一直保持开启，直到你点上面的「关闭」。'
+                    : '当前出口由你手动持有；点上面的「关闭」即可停止。')
+              : null,
           ),
 
           // ---- 穿透（仅手动模式）：影响全机
@@ -381,11 +418,12 @@ window.__ModuleLoader__.load({
           ? `代理${stateLabel}｜${modeLabel}管理${running && state.mode === 'core' && state.node ? `｜${state.node}` : ''}｜点击打开面板`
           : '代理网关',
         'aria-label': state ? `代理网关：${modeLabel}管理，当前${stateLabel}` : '代理网关',
+        'aria-busy': busy ? 'true' : 'false',
         onClick: () => setOpen(true),
       },
-      h('span', { className: dotClass(state) }),
+      busy ? h('span', { className: 'pg-spin' }) : h('span', { className: dotClass(state) }),
       h('span', null, '代理'),
-      state ? h('span', { className: 'pg-chip-mode' }, modeLabel) : null)
+      state ? h('span', { className: 'pg-chip-mode' }, busy ? `${busy}…` : modeLabel) : null)
 
       if (!open) {
         return h(React.Fragment, null, h('style', null, CSS), chip)

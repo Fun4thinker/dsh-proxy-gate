@@ -16,6 +16,15 @@
  */
 
 /** 一个持有者。kind 目前只有 agent（智能体）与 ui（人工面板/命令行）。 */
+const UI_KEY = 'ui'
+
+/** 持有者的可读名字（'ui' 这种内部键不要直接给模型/用户看）。 */
+function labelFor(id) {
+  if (id === UI_KEY) return '人工面板'
+  // session id 形如 session-1ecb61b0-...，去掉前缀再取前 8 位便于辨认
+  const short = id.replace(/^session-/i, '').slice(0, 8)
+  return short ? `智能体 ${short}` : '智能体'
+}
 export class HoldRegistry {
   constructor() {
     /** @type {Map<string, {kind: string, label: string, at: number}>} */
@@ -32,7 +41,7 @@ export class HoldRegistry {
   hold(key, meta = {}) {
     const id = String(key ?? '').trim() || 'ui'
     if (this.holds.has(id)) return false
-    this.holds.set(id, { kind: meta.kind ?? 'agent', label: meta.label ?? id, at: Date.now() })
+    this.holds.set(id, { kind: meta.kind ?? 'agent', label: meta.label ?? labelFor(id), at: Date.now() })
     return true
   }
 
@@ -71,5 +80,10 @@ export class HoldRegistry {
   /** @returns {Array<{key: string, kind: string, label: string, at: number}>} */
   list() {
     return [...this.holds.entries()].map(([key, value]) => ({ key, ...value }))
+  }
+
+  /** 是否存在「人工持有」（人工开的代理，AI 关不掉）。 */
+  get hasManual() {
+    return this.holds.has(UI_KEY)
   }
 }

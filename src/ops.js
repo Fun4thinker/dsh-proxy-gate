@@ -45,6 +45,8 @@ export async function snapshot({ core, store, config, holds }) {
     autoMode: store.autoMode(),
     holders: Array.isArray(holds?.list?.()) ? holds.list() : [],
     holderCount: holds?.size ?? 0,
+    /** 人工是否持有一份（人工开的代理：AI 关不掉）。 */
+    manualHold: holds?.hasManual === true,
     /** 系统代理（穿透）与 TUN 的当前状态。 */
     systemProxy: summary.systemProxy === true,
     tun: summary.tun === true,
